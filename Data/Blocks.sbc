@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <CubeBlocks>
+    <Definition xsi:type="MyObjectBuilder_PoweredCargoContainerDefinition">
+      <Id>
+        <TypeId>Collector</TypeId>
+        <SubtypeId>LargeGravityCollector</SubtypeId>
+      </Id>
+      <DisplayName>Gravity Collector</DisplayName>
+      <Icon>Textures\Icons\GravityCollector.dds</Icon>
+      <CubeSize>Large</CubeSize>
+      <BlockTopology>TriangleMesh</BlockTopology>
+      <Size x="1" y="1" z="1" />
+      <ModelOffset x="0" y="0" z="0" />
+      <Model>Models\LargeGravityCollector.mwm</Model>
+      <Components>
+        <Component Subtype="SteelPlate" Count="40" />
+        <Component Subtype="Construction" Count="60" />
+        <Component Subtype="SmallTube" Count="20" />
+        <Component Subtype="Motor" Count="12" />
+        <Component Subtype="LargeTube" Count="4" />
+        <Component Subtype="GravityGenerator" Count="4" />
+        <Component Subtype="Computer" Count="60" />
+        <Component Subtype="Construction" Count="20" />
+        <Component Subtype="SteelPlate" Count="30" />
+      </Components>
+      <CriticalComponent Subtype="Computer" Index="0" />
+      <BuildProgressModels>
+        <Model BuildPercentUpperBound="0.33" File="Models\LargeGravityCollector_Construction1.mwm" />
+        <Model BuildPercentUpperBound="0.66" File="Models\LargeGravityCollector_Construction2.mwm" />
+        <Model BuildPercentUpperBound="1.00" File="Models\LargeGravityCollector_Construction3.mwm" />
+      </BuildProgressModels>
+      <BlockPairName>GravityCollector</BlockPairName>
+      <EdgeType>Light</EdgeType>
+      <BuildTimeSeconds>28</BuildTimeSeconds>
+      <RequiredPowerInput>0.35</RequiredPowerInput>
+      <ResourceSinkGroup>Conveyors</ResourceSinkGroup>
+      <InventorySize>
+        <X>2.5</X>
+        <Y>2.5</Y>
+        <Z>1</Z>
+      </InventorySize>
+      <MountPoints>
+        <MountPoint Side="Bottom" StartX="0" StartY="0" EndX="1" EndY="1" />
+        <MountPoint Side="Top" StartX="0" StartY="0" EndX="1" EndY="1" />
+        <MountPoint Side="Back" StartX="0" StartY="0" EndX="1" EndY="1" />
+        <MountPoint Side="Left" StartX="0" StartY="0" EndX="1" EndY="1" />
+        <MountPoint Side="Right" StartX="0" StartY="0" EndX="1" EndY="1" />
+      </MountPoints>
+      <MirroringY>Z</MirroringY>
+      <MirroringZ>Y</MirroringZ>
+      <DamageEffectId>212</DamageEffectId>
+    </Definition>
+    <Definition xsi:type="MyObjectBuilder_PoweredCargoContainerDefinition">
+      <Id>
+        <TypeId>Collector</TypeId>
+        <SubtypeId>MediumGravityCollector</SubtypeId>
+      </Id>
+      <DisplayName>Gravity Collector</DisplayName>
+      <Icon>Textures\Icons\GravityCollector.dds</Icon>
+      <CubeSize>Small</CubeSize>
+      <BlockTopology>TriangleMesh</BlockTopology>
+      <Size x="3" y="3" z="3" />
+      <ModelOffset x="0" y="0" z="0" />
+      <Model>Models\MediumGravityCollector.mwm</Model>
+      <Components>
+        <Component Subtype="SteelPlate" Count="30" />
+        <Component Subtype="Construction" Count="40" />
+        <Component Subtype="SmallTube" Count="10" />
+        <Component Subtype="Motor" Count="8" />
+        <Component Subtype="LargeTube" Count="2" />
+        <Component Subtype="GravityGenerator" Count="2" />
+        <Component Subtype="Computer" Count="30" />
+        <Component Subtype="Construction" Count="10" />
+        <Component Subtype="SteelPlate" Count="15" />
+      </Components>
+      <CriticalComponent Subtype="Computer" Index="0" />
+      <BuildProgressModels>
+        <Model BuildPercentUpperBound="0.50" File="Models\MediumGravityCollector_Construction1.mwm" />
+        <Model BuildPercentUpperBound="1.00" File="Models\MediumGravityCollector_Construction2.mwm" />
+      </BuildProgressModels>
+      <BlockPairName>GravityCollector</BlockPairName>
+      <EdgeType>Light</EdgeType>
+      <BuildTimeSeconds>18</BuildTimeSeconds>
+      <RequiredPowerInput>0.1</RequiredPowerInput>
+      <ResourceSinkGroup>Conveyors</ResourceSinkGroup>
+      <InventorySize>
+        <X>1.5</X>
+        <Y>1.5</Y>
+        <Z>0.7</Z>
+      </InventorySize>
+      <MountPoints>
+        <MountPoint Side="Bottom" StartX="0" StartY="0" EndX="3" EndY="3" />
+        <MountPoint Side="Top" StartX="0" StartY="0" EndX="3" EndY="3" />
+        <MountPoint Side="Back" StartX="0" StartY="0" EndX="3" EndY="3" />
+        <MountPoint Side="Left" StartX="0" StartY="0" EndX="3" EndY="3" />
+        <MountPoint Side="Right" StartX="0" StartY="0" EndX="3" EndY="3" />
+      </MountPoints>
+      <MirroringY>Z</MirroringY>
+      <MirroringZ>Y</MirroringZ>
+      <DamageEffectId>212</DamageEffectId>
+    </Definition>
+  </CubeBlocks>
+</Definitions>
