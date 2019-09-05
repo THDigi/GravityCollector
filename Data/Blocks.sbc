@@ -33,7 +33,7 @@
       <BlockPairName>GravityCollector</BlockPairName>
       <EdgeType>Light</EdgeType>
       <BuildTimeSeconds>28</BuildTimeSeconds>
-      <RequiredPowerInput>0.35</RequiredPowerInput>
+      <RequiredPowerInput>0.6</RequiredPowerInput>
       <ResourceSinkGroup>Conveyors</ResourceSinkGroup>
       <InventorySize>
         <X>2.5</X>
@@ -82,7 +82,7 @@
       <BlockPairName>GravityCollector</BlockPairName>
       <EdgeType>Light</EdgeType>
       <BuildTimeSeconds>18</BuildTimeSeconds>
-      <RequiredPowerInput>0.1</RequiredPowerInput>
+      <RequiredPowerInput>0.3</RequiredPowerInput>
       <ResourceSinkGroup>Conveyors</ResourceSinkGroup>
       <InventorySize>
         <X>1.5</X>

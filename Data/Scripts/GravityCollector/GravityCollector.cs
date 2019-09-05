@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using Sandbox.Common.ObjectBuilders;
+using Sandbox.Definitions;
 using Sandbox.Game.Entities;
 using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI;
@@ -43,21 +44,38 @@ namespace Digi.GravityCollector
             set
             {
                 Settings.Range = MathHelper.Clamp((int)Math.Floor(value), RANGE_MIN, maxRange);
+
                 SettingsChanged();
+
+                if(Settings.Range < RANGE_OFF_EXCLUSIVE)
+                {
+                    NeedsUpdate = MyEntityUpdateEnum.NONE;
+                }
+                else
+                {
+                    if((NeedsUpdate & MyEntityUpdateEnum.EACH_10TH_FRAME) == 0)
+                        NeedsUpdate |= MyEntityUpdateEnum.EACH_10TH_FRAME;
+                }
+
+                block?.Components?.Get<MyResourceSinkComponent>()?.Update();
             }
         }
 
-        public float Strength
+        public float StrengthMul
         {
             get { return Settings.Strength; }
             set
             {
                 Settings.Strength = MathHelper.Clamp(value, STRENGTH_MIN / 100f, STRENGTH_MAX / 100f);
+
                 SettingsChanged();
+
+                block?.Components?.Get<MyResourceSinkComponent>()?.Update();
             }
         }
 
         IMyCollector block;
+        MyPoweredCargoContainerDefinition blockDef;
 
         public readonly GravityCollectorBlockSettings Settings = new GravityCollectorBlockSettings();
         int syncCountdown;
@@ -100,6 +118,8 @@ namespace Digi.GravityCollector
                 if(block.CubeGrid?.Physics == null)
                     return;
 
+                blockDef = (MyPoweredCargoContainerDefinition)block.SlimBlock.BlockDefinition;
+
                 floatingObjects = new List<IMyFloatingObject>();
 
                 switch(block.BlockDefinition.SubtypeId)
@@ -117,6 +137,10 @@ namespace Digi.GravityCollector
                 }
 
                 NeedsUpdate = MyEntityUpdateEnum.EACH_FRAME | MyEntityUpdateEnum.EACH_10TH_FRAME;
+
+                // override block's power usage behavior
+                var sink = block.Components?.Get<MyResourceSinkComponent>();
+                sink?.SetRequiredInputFuncByType(MyResourceDistributorComponent.ElectricityId, ComputeRequiredPower);
 
                 // set default settings
                 Settings.Strength = 1.0f;
@@ -153,6 +177,17 @@ namespace Digi.GravityCollector
             }
         }
 
+        float ComputeRequiredPower()
+        {
+            if(!block.IsWorking)
+                return 0f;
+
+            var baseUsage = 0.002f; // same as vanilla collector
+            var maxPowerUsage = blockDef.RequiredPowerInput;
+            var mul = (StrengthMul / (STRENGTH_MAX / 100f)) * (Range / maxRange);
+            return baseUsage + maxPowerUsage * mul;
+        }
+
         public override void UpdateBeforeSimulation10()
         {
             try
@@ -176,7 +211,7 @@ namespace Digi.GravityCollector
             {
                 if((NeedsUpdate & MyEntityUpdateEnum.EACH_FRAME) != 0)
                 {
-                    UpdateEmissive(false);
+                    UpdateEmissive();
                     NeedsUpdate &= ~MyEntityUpdateEnum.EACH_FRAME;
                 }
 
@@ -259,7 +294,10 @@ namespace Digi.GravityCollector
                     return;
 
                 if(floatingObjects.Count == 0)
+                {
+                    UpdateEmissive();
                     return;
+                }
 
                 var collectPos = block.WorldMatrix.Translation + (block.WorldMatrix.Forward * offset);
                 var blockVel = block.CubeGrid.Physics.GetVelocityAtPoint(collectPos);
@@ -291,7 +329,7 @@ namespace Digi.GravityCollector
 
                         var vel = floatingObject.Physics.LinearVelocity - blockVel;
                         var stop = vel - (collectDir * collectDir.Dot(vel));
-                        var force = -(stop + collectDir) * Math.Min(floatingObject.Physics.Mass * MASS_MUL, MAX_MASS) * Strength;
+                        var force = -(stop + collectDir) * Math.Min(floatingObject.Physics.Mass * MASS_MUL, MAX_MASS) * StrengthMul;
 
                         force *= APPLY_FORCE_SKIP_TICKS; // multiplied by how many ticks were skipped
 
@@ -311,7 +349,8 @@ namespace Digi.GravityCollector
                     pulling++;
                 }
 
-                UpdateEmissive(pulling > 0);
+                if(applyForce)
+                    UpdateEmissive(pulling > 0);
             }
             catch(Exception e)
             {
@@ -458,7 +497,7 @@ namespace Digi.GravityCollector
                             break;
                         case "str":
                             if(float.TryParse(data[1], out f))
-                                Strength = f;
+                                StrengthMul = f;
                             break;
                     }
                 }
@@ -533,7 +572,7 @@ namespace Digi.GravityCollector
 
             var controlStrength = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, T>(CONTROLS_PREFIX + "Strength");
             controlStrength.Title = MyStringId.GetOrCompute("Pull Strength");
-            controlStrength.Tooltip = MyStringId.GetOrCompute($"Formula used:\nForce = Min(ObjectMass * {MASS_MUL}, {MAX_MASS}) * Strength");
+            controlStrength.Tooltip = MyStringId.GetOrCompute($"Formula used:\nForce = Min(ObjectMass * {MASS_MUL.ToString()}, {MAX_MASS.ToString()}) * Strength");
             controlStrength.Visible = Control_Visible;
             controlStrength.SupportsMultipleBlocks = true;
             controlStrength.SetLimits(STRENGTH_MIN, STRENGTH_MAX);
@@ -553,21 +592,21 @@ namespace Digi.GravityCollector
         static float Control_Strength_Getter(IMyTerminalBlock block)
         {
             var logic = GetLogic(block);
-            return (logic == null ? STRENGTH_MIN : logic.Strength * 100);
+            return (logic == null ? STRENGTH_MIN : logic.StrengthMul * 100);
         }
 
         static void Control_Strength_Setter(IMyTerminalBlock block, float value)
         {
             var logic = GetLogic(block);
             if(logic != null)
-                logic.Strength = ((int)value / 100f);
+                logic.StrengthMul = ((int)value / 100f);
         }
 
         static void Control_Strength_Writer(IMyTerminalBlock block, StringBuilder writer)
         {
             var logic = GetLogic(block);
             if(logic != null)
-                writer.Append((int)(logic.Strength * 100f)).Append('%');
+                writer.Append((int)(logic.StrengthMul * 100f)).Append('%');
         }
 
         static float Control_Range_Getter(IMyTerminalBlock block)
