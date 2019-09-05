@@ -1,40 +1,91 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
-using Sandbox.Definitions;
 using Sandbox.Common.ObjectBuilders;
+using Sandbox.Game.Entities;
+using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI;
-using VRage.ObjectBuilders;
-using VRage.Game.ModAPI;
+using Sandbox.ModAPI.Interfaces.Terminal;
+using VRage.Game;
 using VRage.Game.Components;
+using VRage.Game.ModAPI;
 using VRage.ModAPI;
+using VRage.ObjectBuilders;
 using VRage.Utils;
 using VRageMath;
-using Sandbox.Game.Entities;
-using VRage.Game.Entity;
-using VRage.Game;
 
 namespace Digi.GravityCollector
 {
     [MyEntityComponentDescriptor(typeof(MyObjectBuilder_Collector), false, "MediumGravityCollector", "LargeGravityCollector")]
     public class GravityCollector : MyGameLogicComponent
     {
-        private IMyCollector block;
-        private float offset;
-        private int maxDist;
-        private double cone;
-        private float rangeSq;
-        private float strength;
-        private bool skip = true;
-        private List<MyEntity> entities = new List<MyEntity>();
-        private List<IMyFloatingObject> floatingObjects = new List<IMyFloatingObject>();
+        public const float RANGE_MIN = 0;
+        public const float RANGE_MAX_MEDIUM = 40;
+        public const float RANGE_MAX_LARGE = 60;
+        public const float RANGE_OFF_EXCLUSIVE = 1;
 
-        private const float MAX_STRENGTH = 2.0f;
-        private const int MAX_MASS = 5000;
+        public const float STRENGTH_MIN = 1;
+        public const float STRENGTH_MAX = 200;
+
+        public const int APPLY_FORCE_SKIP_TICKS = 3; // how many ticks between applying forces to floating objects
+        public const double MAX_VIEW_RANGE_SQ = 500 * 500; // max distance that the cone and pulsing item sprites can be seen from, squared value.
+
+        public const float MASS_MUL = 10; // multiply item mass to get force
+        public const float MAX_MASS = 5000; // max mass to multiply
+
+        public const string CONTROLS_PREFIX = "GravityCollector.";
+        public readonly Guid SETTINGS_GUID = new Guid("0DFC6F70-310D-4D1C-A55F-C57913E20389");
+        public const int SETTINGS_CHANGED_COUNTDOWN = (60 * 1) / 10; // div by 10 because it runs in update10
+
+        public float Range
+        {
+            get { return Settings.Range; }
+            set
+            {
+                Settings.Range = MathHelper.Clamp((int)Math.Floor(value), RANGE_MIN, maxRange);
+                SettingsChanged();
+            }
+        }
+
+        public float Strength
+        {
+            get { return Settings.Strength; }
+            set
+            {
+                Settings.Strength = MathHelper.Clamp(value, STRENGTH_MIN / 100f, STRENGTH_MAX / 100f);
+                SettingsChanged();
+            }
+        }
+
+        IMyCollector block;
+
+        public readonly GravityCollectorBlockSettings Settings = new GravityCollectorBlockSettings();
+        int syncCountdown;
+
+        double coneAngle;
+        float offset;
+        float maxRange;
+
+        int skipTicks;
+        List<IMyFloatingObject> floatingObjects;
+
+        GravityCollectorMod Mod => GravityCollectorMod.Instance;
+
+        bool DrawCone
+        {
+            get
+            {
+                if(MyAPIGateway.Utilities.IsDedicated || !block.ShowOnHUD)
+                    return false;
+
+                var relation = block.GetPlayerRelationToOwner();
+
+                return (relation != MyRelationsBetweenPlayerAndBlock.Enemies);
+            }
+        }
 
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
         {
-            block = Entity as IMyCollector;
             NeedsUpdate = MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
         }
 
@@ -42,39 +93,41 @@ namespace Digi.GravityCollector
         {
             try
             {
-                if(block == null || block.CubeGrid.Physics == null)
+                SetupTerminalControls<IMyCollector>();
+
+                block = (IMyCollector)Entity;
+
+                if(block.CubeGrid?.Physics == null)
                     return;
 
-                NeedsUpdate = MyEntityUpdateEnum.EACH_FRAME | MyEntityUpdateEnum.EACH_10TH_FRAME;
+                floatingObjects = new List<IMyFloatingObject>();
 
                 switch(block.BlockDefinition.SubtypeId)
                 {
                     case "MediumGravityCollector":
-                        maxDist = 15;
-                        cone = 30;
+                        maxRange = RANGE_MAX_MEDIUM;
+                        coneAngle = MathHelper.ToRadians(30);
                         offset = 0.75f;
                         break;
                     case "LargeGravityCollector":
-                        maxDist = 50;
-                        cone = 25;
+                        maxRange = RANGE_MAX_LARGE;
+                        coneAngle = MathHelper.ToRadians(25);
                         offset = 1.5f;
                         break;
                 }
 
-                strength = 1.0f;
-                rangeSq = maxDist * maxDist;
-                cone = Math.Cos(cone * (Math.PI / 180));
+                NeedsUpdate = MyEntityUpdateEnum.EACH_FRAME | MyEntityUpdateEnum.EACH_10TH_FRAME;
 
-                string name = block.CustomName.Trim();
+                // set default settings
+                Settings.Strength = 1.0f;
+                Settings.Range = maxRange;
 
-                if(!name.EndsWith("]", StringComparison.Ordinal))
-                    block.CustomName = name + " [range=" + maxDist + ";str=1.0]";
+                if(!LoadSettings())
+                {
+                    ParseLegacyNameStorage();
+                }
 
-                block.CustomNameChanged += NameChanged;
-                block.AppendingCustomInfo += CustomInfo;
-                block.CubeGrid.PositionComp.OnPositionChanged += OnPositionChanged;
-
-                NameChanged(block);
+                SaveSettings(); // required for IsSerialized()
             }
             catch(Exception e)
             {
@@ -89,9 +142,9 @@ namespace Digi.GravityCollector
                 if(block == null)
                     return;
 
-                block.CustomNameChanged -= NameChanged;
-                block.AppendingCustomInfo -= CustomInfo;
-                block.CubeGrid.PositionComp.OnPositionChanged -= OnPositionChanged;
+                floatingObjects?.Clear();
+                floatingObjects = null;
+
                 block = null;
             }
             catch(Exception e)
@@ -104,72 +157,161 @@ namespace Digi.GravityCollector
         {
             try
             {
-                entities.Clear();
-                floatingObjects.Clear();
-
-                if(block.IsWorking)
-                {
-                    var sphere = new BoundingSphereD(block.WorldMatrix.Translation, maxDist + 10);
-
-                    MyGamePruningStructure.GetAllTopMostEntitiesInSphere(ref sphere, entities, MyEntityQueryType.Dynamic);
-
-                    foreach(var ent in entities)
-                    {
-                        var floatingObject = ent as IMyFloatingObject;
-
-                        if(floatingObject != null)
-                        {
-                            floatingObjects.Add(floatingObject);
-                        }
-                    }
-
-                    entities.Clear();
-                }
+                SyncSettings();
+                FindFloatingObjects();
             }
             catch(Exception e)
             {
                 Log.Error(e);
             }
+        }
+
+        void FindFloatingObjects()
+        {
+            var entities = Mod.Entities;
+            entities.Clear();
+            floatingObjects.Clear();
+
+            if(Range < RANGE_OFF_EXCLUSIVE || !block.IsWorking || !block.CubeGrid.Physics.Enabled)
+            {
+                if((NeedsUpdate & MyEntityUpdateEnum.EACH_FRAME) != 0)
+                {
+                    UpdateEmissive(false);
+                    NeedsUpdate &= ~MyEntityUpdateEnum.EACH_FRAME;
+                }
+
+                return;
+            }
+
+            if((NeedsUpdate & MyEntityUpdateEnum.EACH_FRAME) == 0)
+                NeedsUpdate |= MyEntityUpdateEnum.EACH_FRAME;
+
+            var collectPos = block.WorldMatrix.Translation + (block.WorldMatrix.Forward * offset);
+            var sphere = new BoundingSphereD(collectPos, Range + 10);
+
+            MyGamePruningStructure.GetAllTopMostEntitiesInSphere(ref sphere, entities, MyEntityQueryType.Dynamic);
+
+            foreach(var ent in entities)
+            {
+                var floatingObject = ent as IMyFloatingObject;
+
+                if(floatingObject != null && floatingObject.Physics != null)
+                    floatingObjects.Add(floatingObject);
+            }
+
+            entities.Clear();
+        }
+
+        private Color prevColor;
+
+        void UpdateEmissive(bool pulling = false)
+        {
+            var color = Color.Red;
+            float strength = 0f;
+
+            if(block.IsWorking)
+            {
+                strength = 1f;
+
+                if(pulling)
+                    color = Color.Cyan;
+                else
+                    color = new Color(10, 255, 0);
+            }
+
+            if(prevColor == color)
+                return;
+
+            prevColor = color;
+            block.SetEmissiveParts("Emissive", color, strength);
         }
 
         public override void UpdateAfterSimulation()
         {
             try
             {
-                skip = !skip;
+                if(Range < RANGE_OFF_EXCLUSIVE)
+                    return;
 
-                if(skip)
-                    return; // skip half of the ticks
+                bool applyForce = false;
+                if(++skipTicks >= APPLY_FORCE_SKIP_TICKS)
+                {
+                    skipTicks = 0;
+                    applyForce = true;
+                }
 
-                if(!block.IsWorking || !block.CubeGrid.Physics.Enabled)
+                if(!applyForce && MyAPIGateway.Utilities.IsDedicated)
                     return;
 
                 var conePos = block.WorldMatrix.Translation + (block.WorldMatrix.Forward * -offset);
+                bool inViewRange = false;
+
+                if(!MyAPIGateway.Utilities.IsDedicated)
+                {
+                    var cameraMatrix = MyAPIGateway.Session.Camera.WorldMatrix;
+                    inViewRange = Vector3D.DistanceSquared(cameraMatrix.Translation, conePos) <= MAX_VIEW_RANGE_SQ;
+
+                    if(inViewRange && DrawCone)
+                        DrawInfluenceCone(conePos);
+                }
+
+                if(!applyForce && !inViewRange)
+                    return;
+
+                if(floatingObjects.Count == 0)
+                    return;
+
                 var collectPos = block.WorldMatrix.Translation + (block.WorldMatrix.Forward * offset);
                 var blockVel = block.CubeGrid.Physics.GetVelocityAtPoint(collectPos);
+                var rangeSq = Range * Range;
+                int pulling = 0;
 
-                foreach(var floatingObject in floatingObjects)
+                for(int i = (floatingObjects.Count - 1); i >= 0; --i)
                 {
-                    if(floatingObject.Closed)
-                        continue;
+                    var floatingObject = floatingObjects[i];
 
-                    var entPos = floatingObject.GetPosition();
-                    var distSq = Vector3D.DistanceSquared(collectPos, entPos);
+                    if(floatingObject.MarkedForClose || !floatingObject.Physics.Enabled)
+                        continue; // it'll get removed by FindFloatingObjects()
 
-                    if(distSq <= rangeSq)
+                    var objPos = floatingObject.GetPosition();
+                    var distSq = Vector3D.DistanceSquared(collectPos, objPos);
+
+                    if(distSq > rangeSq)
+                        continue; // too far from cone
+
+                    var dirNormalized = Vector3D.Normalize(objPos - conePos);
+                    var angle = Math.Acos(MathHelper.Clamp(Vector3D.Dot(block.WorldMatrix.Forward, dirNormalized), -1, 1));
+
+                    if(angle > coneAngle)
+                        continue; // outside of the cone's FOV
+
+                    if(applyForce)
                     {
-                        var dir = Vector3D.Normalize(entPos - conePos);
-                        var dot = block.WorldMatrix.Forward.Dot(dir);
+                        var collectDir = Vector3D.Normalize(objPos - collectPos);
 
-                        if(dot > cone)
-                        {
-                            var vel = floatingObject.Physics.LinearVelocity - blockVel;
-                            var stop = vel - (dir * dir.Dot(vel));
-                            var force = -(stop + dir) * Math.Min(floatingObject.Physics.Mass * 10, MAX_MASS) * strength;
-                            floatingObject.Physics.AddForce(MyPhysicsForceType.APPLY_WORLD_FORCE, force * 2, null, null); // multiplied by 2 because it runs at 30 ticks instead of 60
-                        }
+                        var vel = floatingObject.Physics.LinearVelocity - blockVel;
+                        var stop = vel - (collectDir * collectDir.Dot(vel));
+                        var force = -(stop + collectDir) * Math.Min(floatingObject.Physics.Mass * MASS_MUL, MAX_MASS) * Strength;
+
+                        force *= APPLY_FORCE_SKIP_TICKS; // multiplied by how many ticks were skipped
+
+                        //MyTransparentGeometry.AddLineBillboard(Mod.MATERIAL_SQUARE, Color.Yellow, objPos, force, 1f, 0.1f);
+
+                        floatingObject.Physics.AddForce(MyPhysicsForceType.APPLY_WORLD_FORCE, force, null, null);
                     }
+
+                    if(inViewRange)
+                    {
+                        var mul = (float)Math.Sin(DateTime.UtcNow.TimeOfDay.TotalMilliseconds * 0.01);
+                        var radius = floatingObject.Model.BoundingSphere.Radius * MinMaxPercent(0.75f, 1.25f, mul);
+
+                        MyTransparentGeometry.AddPointBillboard(Mod.MATERIAL_DOT, Color.LightSkyBlue * MinMaxPercent(0.2f, 0.4f, mul), objPos, radius, 0);
+                    }
+
+                    pulling++;
                 }
+
+                UpdateEmissive(pulling > 0);
             }
             catch(Exception e)
             {
@@ -177,80 +319,292 @@ namespace Digi.GravityCollector
             }
         }
 
-        public void CustomInfo(IMyTerminalBlock block, StringBuilder info)
+        void DrawInfluenceCone(Vector3D conePos)
         {
-            var def = (MyPoweredCargoContainerDefinition)block.SlimBlock.BlockDefinition;
+            Vector4 color = Color.Cyan.ToVector4() * 10;
+            Vector4 planeColor = (Color.White * 0.1f).ToVector4();
+            const float LINE_THICK = 0.02f;
+            const int WIRE_DIV_RATIO = 16;
 
-            info.Append("Power usage: ");
-            MyValueFormatter.AppendWorkInBestUnit(def.RequiredPowerInput, info);
-            info.Append("\n\nGravity settings:\n");
-            info.AppendFormat("Range = {0}m of {1}m\n", Math.Round(Math.Sqrt(rangeSq), 2), maxDist);
-            info.AppendFormat("Strength = {0}%\n", Math.Round(strength * 100, 0));
-            info.Append("Edit the settings in the block's name.\n");
+            var coneMatrix = block.WorldMatrix;
+            coneMatrix.Translation = conePos;
+
+            //MyTransparentGeometry.AddPointBillboard(Mod.MATERIAL_DOT, Color.Lime, collectPos, 0.05f, 0);
+
+            float rangeOffset = Range + (offset * 2); // because range check starts from collectPos but cone starts from conePos
+            float baseRadius = rangeOffset * (float)Math.Tan(coneAngle);
+
+            //MySimpleObjectDraw.DrawTransparentCone(ref coneMatrix, baseRadius, rangeWithOffset, ref color, 16, Mod.MATERIAL_SQUARE);
+
+            var apexPosition = coneMatrix.Translation;
+            var directionVector = coneMatrix.Forward * rangeOffset;
+            var maxPosCenter = conePos + coneMatrix.Forward * rangeOffset;
+            var baseVector = coneMatrix.Up * baseRadius;
+
+            Vector3 axis = directionVector;
+            axis.Normalize();
+
+            float stepAngle = (float)(Math.PI * 2.0 / (double)WIRE_DIV_RATIO);
+
+            var prevConePoint = apexPosition + directionVector + Vector3.Transform(baseVector, Matrix.CreateFromAxisAngle(axis, (-1 * stepAngle)));
+            prevConePoint = (apexPosition + Vector3D.Normalize((prevConePoint - apexPosition)) * rangeOffset);
+
+            var quad = default(MyQuadD);
+
+            for(int step = 0; step < WIRE_DIV_RATIO; step++)
+            {
+                var conePoint = apexPosition + directionVector + Vector3.Transform(baseVector, Matrix.CreateFromAxisAngle(axis, (step * stepAngle)));
+                var lineDir = (conePoint - apexPosition);
+                lineDir.Normalize();
+                conePoint = (apexPosition + lineDir * rangeOffset);
+
+                MyTransparentGeometry.AddLineBillboard(Mod.MATERIAL_SQUARE, color, conePoint, (prevConePoint - conePoint), 1f, LINE_THICK);
+
+                MyTransparentGeometry.AddLineBillboard(Mod.MATERIAL_SQUARE, color, apexPosition, lineDir, rangeOffset, LINE_THICK);
+
+                MyTransparentGeometry.AddLineBillboard(Mod.MATERIAL_SQUARE, color, conePoint, (maxPosCenter - conePoint), 1f, LINE_THICK);
+
+                // Unusable because SQUARE has reflectivity and this method uses materials' reflectivity... making it unable to be made transparent, also reflective xD
+                //var normal = Vector3.Up;
+                //MyTransparentGeometry.AddTriangleBillboard(
+                //    apexPosition, prevConePoint, conePoint,
+                //    normal, normal, normal,
+                //    new Vector2(0, 0), new Vector2(0, 1), new Vector2(1, 1),
+                //    Mod.MATERIAL_SQUARE, uint.MaxValue, conePoint, planeColor);
+                // also NOTE: if triangle is used, color needs .ToLinearRGB().
+
+                quad.Point0 = prevConePoint;
+                quad.Point1 = conePoint;
+                quad.Point2 = apexPosition;
+                quad.Point3 = apexPosition;
+                MyTransparentGeometry.AddQuad(Mod.MATERIAL_SQUARE, ref quad, planeColor, ref Vector3D.Zero);
+
+                quad.Point0 = prevConePoint;
+                quad.Point1 = conePoint;
+                quad.Point2 = maxPosCenter;
+                quad.Point3 = maxPosCenter;
+                MyTransparentGeometry.AddQuad(Mod.MATERIAL_SQUARE, ref quad, planeColor, ref Vector3D.Zero);
+
+                prevConePoint = conePoint;
+            }
         }
 
-        public void NameChanged(IMyTerminalBlock block)
+        bool LoadSettings()
         {
+            if(block.Storage == null)
+                return false;
+
+            string rawData;
+            if(!block.Storage.TryGetValue(SETTINGS_GUID, out rawData))
+                return false;
+
             try
             {
-                string name = block.CustomName.TrimEnd(' ');
+                var loadedSettings = MyAPIGateway.Utilities.SerializeFromBinary<GravityCollectorBlockSettings>(Convert.FromBase64String(rawData));
 
-                if(!name.EndsWith("]", StringComparison.Ordinal))
-                    return;
-
-                int startIndex = name.IndexOf('[');
-
-                if(startIndex == -1)
-                    return;
-
-                name = name.Substring(startIndex + 1, name.Length - startIndex - 2);
-
-                if(name.Length == 0)
-                    return;
-
-                string[] args = name.Split(';');
-
-                if(args.Length == 0)
-                    return;
-
-                string[] data;
-
-                foreach(string arg in args)
+                if(loadedSettings != null)
                 {
-                    data = arg.Split('=');
-
-                    if(data.Length == 2)
-                    {
-                        float f;
-
-                        switch(data[0])
-                        {
-                            case "range":
-                                if(float.TryParse(data[1], out f))
-                                {
-                                    rangeSq = MathHelper.Clamp(f, 1, maxDist);
-                                    rangeSq *= rangeSq;
-                                }
-                                break;
-                            case "str":
-                                if(float.TryParse(data[1], out f))
-                                    strength = MathHelper.Clamp(f, 0.0f, MAX_STRENGTH);
-                                break;
-                        }
-                    }
+                    Settings.Range = loadedSettings.Range;
+                    Settings.Strength = loadedSettings.Strength;
+                    return true;
                 }
-
-                block.RefreshCustomInfo();
             }
             catch(Exception e)
             {
-                Log.Error(e);
+                Log.Error($"Error loading settings!\n{e}");
+            }
+
+            return false;
+        }
+
+        bool ParseLegacyNameStorage()
+        {
+            string name = block.CustomName.TrimEnd(' ');
+
+            if(!name.EndsWith("]", StringComparison.Ordinal))
+                return false;
+
+            int startIndex = name.IndexOf('[');
+
+            if(startIndex == -1)
+                return false;
+
+            var settingsStr = name.Substring(startIndex + 1, name.Length - startIndex - 2);
+
+            if(settingsStr.Length == 0)
+                return false;
+
+            string[] args = settingsStr.Split(';');
+
+            if(args.Length == 0)
+                return false;
+
+            string[] data;
+
+            foreach(string arg in args)
+            {
+                data = arg.Split('=');
+
+                float f;
+                int i;
+
+                if(data.Length == 2)
+                {
+                    switch(data[0])
+                    {
+                        case "range":
+                            if(int.TryParse(data[1], out i))
+                                Range = i;
+                            break;
+                        case "str":
+                            if(float.TryParse(data[1], out f))
+                                Strength = f;
+                            break;
+                    }
+                }
+            }
+
+            block.CustomName = name.Substring(0, startIndex).Trim();
+            return true;
+        }
+
+        void SaveSettings()
+        {
+            if(block.Storage == null)
+                block.Storage = new MyModStorageComponent();
+
+            block.Storage.SetValue(SETTINGS_GUID, Convert.ToBase64String(MyAPIGateway.Utilities.SerializeToBinary(Settings)));
+        }
+
+        void SettingsChanged()
+        {
+            if(syncCountdown == 0)
+                syncCountdown = SETTINGS_CHANGED_COUNTDOWN;
+        }
+
+        void SyncSettings()
+        {
+            if(syncCountdown > 0 && --syncCountdown <= 0)
+            {
+                SaveSettings();
+
+                Mod.CachedPacketSettings.Send(block.EntityId, Settings);
             }
         }
 
-        private void OnPositionChanged(MyPositionComponentBase positionComp)
+        public override bool IsSerialized()
         {
-            block?.Physics?.OnWorldPositionChanged(null); // HACK fix for collector's physics not moving with it, bugreport: SE-7720
+            // called when the game iterates components to check if they should be serialized, before they're actually serialized.
+            // this does not only include saving but also streaming and blueprinting.
+            // NOTE for this to work reliably the MyModStorageComponent needs to already exist in this block with at least one element.
+
+            SaveSettings();
+            return false;
         }
+
+        /// <summary>
+        /// Returns the specified percentage multiplier (0 to 1) between min and max.
+        /// </summary>
+        static float MinMaxPercent(float min, float max, float percentMul)
+        {
+            return min + (percentMul * (max - min));
+        }
+
+        #region Terminal controls
+        static void SetupTerminalControls<T>()
+        {
+            var mod = GravityCollectorMod.Instance;
+
+            if(mod.ControlsCreated)
+                return;
+
+            mod.ControlsCreated = true;
+
+            var controlRange = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, T>(CONTROLS_PREFIX + "Range");
+            controlRange.Title = MyStringId.GetOrCompute("Pull Range");
+            controlRange.Tooltip = MyStringId.GetOrCompute("Max distance the cone extends to.");
+            controlRange.Visible = Control_Visible;
+            controlRange.SupportsMultipleBlocks = true;
+            controlRange.SetLimits(Control_Range_Min, Control_Range_Max);
+            controlRange.Getter = Control_Range_Getter;
+            controlRange.Setter = Control_Range_Setter;
+            controlRange.Writer = Control_Range_Writer;
+            MyAPIGateway.TerminalControls.AddControl<T>(controlRange);
+
+            var controlStrength = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, T>(CONTROLS_PREFIX + "Strength");
+            controlStrength.Title = MyStringId.GetOrCompute("Pull Strength");
+            controlStrength.Tooltip = MyStringId.GetOrCompute($"Formula used:\nForce = Min(ObjectMass * {MASS_MUL}, {MAX_MASS}) * Strength");
+            controlStrength.Visible = Control_Visible;
+            controlStrength.SupportsMultipleBlocks = true;
+            controlStrength.SetLimits(STRENGTH_MIN, STRENGTH_MAX);
+            controlStrength.Getter = Control_Strength_Getter;
+            controlStrength.Setter = Control_Strength_Setter;
+            controlStrength.Writer = Control_Strength_Writer;
+            MyAPIGateway.TerminalControls.AddControl<T>(controlStrength);
+        }
+
+        static GravityCollector GetLogic(IMyTerminalBlock block) => block?.GameLogic?.GetAs<GravityCollector>();
+
+        static bool Control_Visible(IMyTerminalBlock block)
+        {
+            return GetLogic(block) != null;
+        }
+
+        static float Control_Strength_Getter(IMyTerminalBlock block)
+        {
+            var logic = GetLogic(block);
+            return (logic == null ? STRENGTH_MIN : logic.Strength * 100);
+        }
+
+        static void Control_Strength_Setter(IMyTerminalBlock block, float value)
+        {
+            var logic = GetLogic(block);
+            if(logic != null)
+                logic.Strength = ((int)value / 100f);
+        }
+
+        static void Control_Strength_Writer(IMyTerminalBlock block, StringBuilder writer)
+        {
+            var logic = GetLogic(block);
+            if(logic != null)
+                writer.Append((int)(logic.Strength * 100f)).Append('%');
+        }
+
+        static float Control_Range_Getter(IMyTerminalBlock block)
+        {
+            var logic = GetLogic(block);
+            return (logic == null ? 0 : logic.Range);
+        }
+
+        static void Control_Range_Setter(IMyTerminalBlock block, float value)
+        {
+            var logic = GetLogic(block);
+            if(logic != null)
+                logic.Range = (int)Math.Floor(value);
+        }
+
+        static float Control_Range_Min(IMyTerminalBlock block)
+        {
+            return RANGE_MIN;
+        }
+
+        static float Control_Range_Max(IMyTerminalBlock block)
+        {
+            var logic = GetLogic(block);
+            return (logic == null ? 0 : logic.maxRange);
+        }
+
+        static void Control_Range_Writer(IMyTerminalBlock block, StringBuilder writer)
+        {
+            var logic = GetLogic(block);
+            if(logic != null)
+            {
+                if(logic.Range < RANGE_OFF_EXCLUSIVE)
+                    writer.Append("OFF");
+                else
+                    writer.Append(logic.Range.ToString("N2")).Append(" m");
+            }
+        }
+        #endregion
     }
 }

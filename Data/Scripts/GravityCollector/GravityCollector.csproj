@@ -114,8 +114,15 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="GravityCollectorBlockSettings.cs" />
     <Compile Include="GravityCollector.cs" />
-    <Compile Include="SlimLog.cs" />
+    <Compile Include="Log.cs" />
+    <Compile Include="GravityCollectorMod.cs" />
+    <Compile Include="Sync\Networking.cs" />
+    <Compile Include="Sync\PacketBase.cs" />
+    <Compile Include="Sync\PacketBlockSettings.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <Analyzer Include="..\..\..\..\..\_SharedCode\SEWhitelistChecker.dll" />
   </ItemGroup>
   <ItemGroup>
