@@ -26,9 +26,9 @@
       </Components>
       <CriticalComponent Subtype="Computer" Index="0" />
       <BuildProgressModels>
-        <Model BuildPercentUpperBound="0.33" File="Models\LargeGravityCollector_Construction1.mwm" />
-        <Model BuildPercentUpperBound="0.66" File="Models\LargeGravityCollector_Construction2.mwm" />
-        <Model BuildPercentUpperBound="1.00" File="Models\LargeGravityCollector_Construction3.mwm" />
+        <Model BuildPercentUpperBound="0.33" File="Models\Cubes\Large\CollectorConstruction_1.mwm" />
+        <Model BuildPercentUpperBound="0.66" File="Models\Cubes\Large\CollectorConstruction_2.mwm" />
+        <Model BuildPercentUpperBound="1.00" File="Models\Cubes\Large\CollectorConstruction_3.mwm" />
       </BuildProgressModels>
       <BlockPairName>GravityCollector</BlockPairName>
       <EdgeType>Light</EdgeType>
@@ -76,8 +76,8 @@
       </Components>
       <CriticalComponent Subtype="Computer" Index="0" />
       <BuildProgressModels>
-        <Model BuildPercentUpperBound="0.50" File="Models\MediumGravityCollector_Construction1.mwm" />
-        <Model BuildPercentUpperBound="1.00" File="Models\MediumGravityCollector_Construction2.mwm" />
+        <Model BuildPercentUpperBound="0.50" File="Models\Cubes\Small\CollectorConstruction_1.mwm" />
+        <Model BuildPercentUpperBound="1.00" File="Models\Cubes\Small\CollectorConstruction_2.mwm" />
       </BuildProgressModels>
       <BlockPairName>GravityCollector</BlockPairName>
       <EdgeType>Light</EdgeType>
