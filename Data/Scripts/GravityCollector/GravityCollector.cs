@@ -509,6 +509,15 @@ namespace Digi.GravityCollector
 
         void SaveSettings()
         {
+            if(block == null)
+                throw new NullReferenceException($"block == null on entId={Entity?.EntityId}; modInstance={GravityCollectorMod.Instance != null}");
+
+            if(Settings == null)
+                throw new NullReferenceException($"Settings == null on entId={Entity?.EntityId}; modInstance={GravityCollectorMod.Instance != null}");
+
+            if(MyAPIGateway.Utilities == null)
+                throw new NullReferenceException($"MyAPIGateway.Utilities == null; entId={Entity?.EntityId}; modInstance={GravityCollectorMod.Instance != null}");
+
             if(block.Storage == null)
                 block.Storage = new MyModStorageComponent();
 
@@ -537,8 +546,16 @@ namespace Digi.GravityCollector
             // this does not only include saving but also streaming and blueprinting.
             // NOTE for this to work reliably the MyModStorageComponent needs to already exist in this block with at least one element.
 
-            SaveSettings();
-            return false;
+            try
+            {
+                SaveSettings();
+            }
+            catch(Exception e)
+            {
+                Log.Error(e);
+            }
+
+            return base.IsSerialized();
         }
 
         /// <summary>
