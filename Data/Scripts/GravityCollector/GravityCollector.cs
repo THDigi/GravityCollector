@@ -510,7 +510,7 @@ namespace Digi.GravityCollector
         void SaveSettings()
         {
             if(block == null)
-                throw new NullReferenceException($"block == null on entId={Entity?.EntityId}; modInstance={GravityCollectorMod.Instance != null}");
+                return; // called too soon or after it was already closed, ignore
 
             if(Settings == null)
                 throw new NullReferenceException($"Settings == null on entId={Entity?.EntityId}; modInstance={GravityCollectorMod.Instance != null}");
@@ -589,7 +589,7 @@ namespace Digi.GravityCollector
 
             var controlStrength = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, T>(CONTROLS_PREFIX + "Strength");
             controlStrength.Title = MyStringId.GetOrCompute("Pull Strength");
-            controlStrength.Tooltip = MyStringId.GetOrCompute($"Formula used:\nForce = Min(ObjectMass * {MASS_MUL.ToString()}, {MAX_MASS.ToString()}) * Strength");
+            controlStrength.Tooltip = MyStringId.GetOrCompute($"Formula used:\nForce = Min(ObjectMass * {MASS_MUL.ToString()}, {MAX_MASS.ToString()}) * (Strength / 100)");
             controlStrength.Visible = Control_Visible;
             controlStrength.SupportsMultipleBlocks = true;
             controlStrength.SetLimits(STRENGTH_MIN, STRENGTH_MAX);
